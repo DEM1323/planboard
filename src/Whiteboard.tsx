@@ -29,13 +29,13 @@ import {
   TLDefaultColorStyle,
   TLDefaultSizeStyle,
   useDefaultColorTheme,
+  createShapeId,
 } from "tldraw";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../convex/_generated/api";
 import { Id } from "../convex/_generated/dataModel";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
-import { EditShapeModal } from "./components/EditShapeModal";
 import { PlanBoardKeyboardShortcuts } from "./components/PlanBoardKeyboardShortcuts";
 
 import {
@@ -59,7 +59,7 @@ import "tldraw/tldraw.css";
 // CUSTOM SHAPES
 // ============================================================================
 
-// Section Shape
+// Updated Section Shape Type
 export type SectionShape = TLBaseShape<
   "section",
   {
@@ -72,6 +72,8 @@ export type SectionShape = TLBaseShape<
     size: TLDefaultSizeStyle;
     w: number;
     h: number;
+    hasTimeRange: boolean; // New: whether to show time range
+    hasNoTime: boolean; // New: whether to show no time at all
   }
 >;
 
@@ -91,7 +93,7 @@ type ActivityShape = TLBaseShape<
   }
 >;
 
-// Section Shape Util
+// Updated Section Shape Util
 class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
   static override type = "section" as const;
 
@@ -105,6 +107,8 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
     size: DefaultSizeStyle,
     w: T.number,
     h: T.number,
+    hasTimeRange: T.boolean,
+    hasNoTime: T.boolean,
   };
 
   override getDefaultProps(): SectionShape["props"] {
@@ -118,89 +122,39 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
       size: "m",
       w: 300,
       h: 200,
+      hasTimeRange: false,
+      hasNoTime: false,
     };
   }
 
   override canEdit = () => true;
+  override canResize = () => true;
 
   override component(shape: SectionShape) {
-    const { title, startTime, endTime, emoji, details, color, size } =
-      shape.props;
+    const {
+      title,
+      startTime,
+      endTime,
+      emoji,
+      details,
+      color,
+      size,
+      hasTimeRange,
+      hasNoTime,
+    } = shape.props;
 
     const editor = useEditor();
     const theme = useDefaultColorTheme();
+    const isSelected = editor.getSelectedShapeIds().includes(shape.id);
     const isEditing = editor.getEditingShapeId() === shape.id;
-    const [editingField, setEditingField] = useState<string | null>(null);
-    const [editValue, setEditValue] = useState("");
-    const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-    const [showTimePicker, setShowTimePicker] = useState(false);
-    const [editingTimeField, setEditingTimeField] = useState<
-      "start" | "end" | null
-    >(null);
 
-    // Emoji and time options
-    const emojis = [
-      "📅",
-      "🎯",
-      "💡",
-      "🚀",
-      "⭐",
-      "🎉",
-      "📝",
-      "🔧",
-      "🎨",
-      "📊",
-      "💼",
-      "🎪",
-      "🍽️",
-      "🍺",
-      "🎬",
-      "🎭",
-      "🏃",
-      "🚶",
-      "🚗",
-      "✈️",
-      "🏖️",
-      "🏠",
-      "🏢",
-      "🏫",
-      "🏥",
-      "🏪",
-      "🎯",
-      "🎲",
-      "🎮",
-      "📚",
-      "💻",
-      "📱",
-      "📷",
-      "🎵",
-      "🎤",
-      "🎸",
-      "🎹",
-      "🎻",
-      "🎺",
-      "🥁",
-      "⚽",
-      "🏀",
-      "🏈",
-      "⚾",
-      "🎾",
-      "🏐",
-      "🏓",
-      "🏸",
-      "🏊",
-      "🚴",
-      "🧘",
-      "💪",
-      "🏋️",
-      "🤸",
-      "🤺",
-      "🏇",
-      "⛷️",
-      "🏂",
-      "🏄",
-      "🚣",
-    ];
+    const sizeStyles = {
+      s: { fontSize: "14px", padding: "8px" },
+      m: { fontSize: "16px", padding: "12px" },
+      l: { fontSize: "18px", padding: "16px" },
+      xl: { fontSize: "20px", padding: "20px" },
+    };
+    const currentSizeStyle = sizeStyles[size] || sizeStyles.m;
 
     const timeOptions = [
       "12:00 AM",
@@ -253,23 +207,310 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
       "11:30 PM",
     ];
 
-    // Update shape prop
-    const updateShape = (updates: Partial<SectionShape["props"]>) => {
-      editor.updateShape<SectionShape>({
-        id: shape.id,
-        type: "section",
-        props: { ...shape.props, ...updates },
-      });
+    const updateShapeProps = useCallback(
+      (updates: Partial<SectionShape["props"]>) => {
+        editor.updateShape({
+          id: shape.id,
+          type: shape.type,
+          props: { ...shape.props, ...updates },
+        });
+      },
+      [editor, shape.id, shape.type, shape.props]
+    );
+
+    const handleInputChange = useCallback(
+      (field: keyof SectionShape["props"], value: any) => {
+        updateShapeProps({ [field]: value });
+      },
+      [updateShapeProps]
+    );
+
+    const handleInputKeyDown = useCallback((e: React.KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === "Escape" || e.key === "Tab") {
+        e.stopPropagation();
+      }
+    }, []);
+
+    const handleInputFocus = useCallback(
+      (e: React.FocusEvent) => {
+        editor.setEditingShape(shape.id);
+      },
+      [editor, shape.id]
+    );
+
+    const handleInputBlur = useCallback(
+      (e: React.FocusEvent) => {
+        setTimeout(() => {
+          const activeElement = document.activeElement;
+          if (!activeElement || !e.currentTarget.contains(activeElement)) {
+            editor.setEditingShape(null);
+          }
+        }, 100);
+      },
+      [editor]
+    );
+
+    // Handle checkbox changes with mutual exclusivity and proper event handling
+    const handleTimeRangeChange = useCallback(
+      (e: React.ChangeEvent<HTMLInputElement>) => {
+        e.stopPropagation();
+        const checked = e.target.checked;
+        if (checked) {
+          updateShapeProps({ hasTimeRange: true, hasNoTime: false });
+        } else {
+          updateShapeProps({ hasTimeRange: false });
+        }
+      },
+      [updateShapeProps]
+    );
+
+    const handleNoTimeChange = useCallback(
+      (e: React.ChangeEvent<HTMLInputElement>) => {
+        e.stopPropagation();
+        const checked = e.target.checked;
+        if (checked) {
+          updateShapeProps({ hasNoTime: true, hasTimeRange: false });
+        } else {
+          updateShapeProps({ hasNoTime: false });
+        }
+      },
+      [updateShapeProps]
+    );
+
+    // Render time display based on settings
+    const renderTimeDisplay = () => {
+      if (hasNoTime) {
+        return (
+          <span
+            style={{
+              fontSize: "16px",
+              color: theme[color].solid,
+              cursor: "pointer",
+            }}
+            onClick={() => editor.setEditingShape(shape.id)}
+          >
+            🕐
+          </span>
+        );
+      }
+
+      if (hasTimeRange) {
+        return (
+          <span
+            style={{
+              fontSize: "12px",
+              color: theme[color].solid,
+              border: "1px dashed transparent",
+              padding: "4px 8px",
+              borderRadius: "4px",
+              backgroundColor: "rgba(255,255,255,0.8)",
+              cursor: "pointer",
+              display: "inline-block",
+            }}
+            onClick={() => editor.setEditingShape(shape.id)}
+          >
+            🕐 {startTime} - {endTime}
+          </span>
+        );
+      }
+
+      // Default: just start time
+      return (
+        <span
+          style={{
+            fontSize: "12px",
+            color: theme[color].solid,
+            border: "1px dashed transparent",
+            padding: "4px 8px",
+            borderRadius: "4px",
+            backgroundColor: "rgba(255,255,255,0.8)",
+            cursor: "pointer",
+            display: "inline-block",
+          }}
+          onClick={() => editor.setEditingShape(shape.id)}
+        >
+          🕐 {startTime}
+        </span>
+      );
     };
 
-    const sizeStyles = {
-      s: { fontSize: "14px", padding: "8px" },
-      m: { fontSize: "16px", padding: "12px" },
-      l: { fontSize: "18px", padding: "16px" },
-      xl: { fontSize: "20px", padding: "20px" },
-    };
+    // Render time controls when editing - fixed positioning and sizing
+    const renderTimeControls = () => {
+      return (
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            right: "0",
+            zIndex: 1000,
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px",
+            padding: "8px",
+            border: `1px solid ${theme[color].solid}`,
+            borderRadius: "4px",
+            backgroundColor: "white",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+            minWidth: "240px",
+            marginTop: "4px",
+          }}
+        >
+          {/* Time inputs row */}
+          <div
+            style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}
+          >
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "4px",
+                flex: 1,
+              }}
+            >
+              <label
+                style={{
+                  fontSize: "10px",
+                  fontWeight: "bold",
+                  color: "#666",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.5px",
+                }}
+              >
+                start time
+              </label>
+              <select
+                value={startTime}
+                onChange={(e) => {
+                  e.stopPropagation();
+                  handleInputChange("startTime", e.target.value);
+                }}
+                onKeyDown={handleInputKeyDown}
+                style={{
+                  fontSize: "12px",
+                  borderRadius: 4,
+                  border: "1px solid #ccc",
+                  backgroundColor: "white",
+                  padding: "6px 4px",
+                  width: "100%",
+                  outline: "none",
+                }}
+              >
+                {timeOptions.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-    const currentSizeStyle = sizeStyles[size] || sizeStyles.m;
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "4px",
+                flex: 1,
+              }}
+            >
+              <label
+                style={{
+                  fontSize: "10px",
+                  fontWeight: "bold",
+                  color: hasTimeRange ? "#666" : "#ccc",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.5px",
+                }}
+              >
+                end time
+              </label>
+              <select
+                value={endTime}
+                onChange={(e) => {
+                  e.stopPropagation();
+                  handleInputChange("endTime", e.target.value);
+                }}
+                onKeyDown={handleInputKeyDown}
+                disabled={!hasTimeRange}
+                style={{
+                  fontSize: "12px",
+                  borderRadius: 4,
+                  border: "1px solid #ccc",
+                  backgroundColor: hasTimeRange ? "white" : "#f5f5f5",
+                  padding: "6px 4px",
+                  width: "100%",
+                  opacity: hasTimeRange ? 1 : 0.6,
+                  cursor: hasTimeRange ? "pointer" : "not-allowed",
+                  outline: "none",
+                }}
+              >
+                {timeOptions.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Checkboxes */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "6px",
+              paddingTop: "4px",
+            }}
+          >
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                fontSize: "12px",
+                cursor: "pointer",
+                userSelect: "none",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <input
+                type="checkbox"
+                checked={hasTimeRange}
+                onChange={handleTimeRangeChange}
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  margin: 0,
+                  cursor: "pointer",
+                }}
+              />
+              <span style={{ color: "#666" }}>time range</span>
+            </label>
+
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                fontSize: "12px",
+                cursor: "pointer",
+                userSelect: "none",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <input
+                type="checkbox"
+                checked={hasNoTime}
+                onChange={handleNoTimeChange}
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  margin: 0,
+                  cursor: "pointer",
+                }}
+              />
+              <span style={{ color: "#666" }}>no time</span>
+            </label>
+          </div>
+        </div>
+      );
+    };
 
     return (
       <HTMLContainer>
@@ -277,7 +518,7 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
           style={{
             width: "100%",
             height: "100%",
-            backgroundColor: theme[color].light,
+            backgroundColor: theme[color].solid + "22",
             border: `2px dashed ${theme[color].solid}`,
             borderRadius: "8px",
             padding: currentSizeStyle.padding,
@@ -288,95 +529,77 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
             fontFamily: "var(--tl-font-ui)",
             fontSize: currentSizeStyle.fontSize,
             pointerEvents: "all",
-            overflow: "visible", // Ensure popups aren't clipped
+            overflow: "visible",
           }}
+          onFocus={handleInputFocus}
+          onBlur={handleInputBlur}
         >
           {/* Header: Emoji, Title, Time */}
           <div
             style={{
               display: "flex",
-              alignItems: "center",
+              alignItems: "flex-start",
               gap: "8px",
               position: "relative",
               overflow: "visible",
             }}
           >
-            {/* Emoji Picker */}
-            <div style={{ position: "relative" }}>
-              {isEditing ? (
-                <>
-                  <button
-                    style={{
-                      fontSize: "20px",
-                      cursor: "pointer",
-                      background: "none",
-                      border: "none",
-                      padding: 0,
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowEmojiPicker(!showEmojiPicker);
-                      setShowTimePicker(false); // Close time picker when opening emoji picker
-                    }}
-                    title="Change emoji"
-                  >
-                    {emoji}
-                  </button>
-                  {showEmojiPicker && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: "100%",
-                        left: 0,
-                        background: "white",
-                        border: "2px solid #333",
-                        borderRadius: 8,
-                        padding: 8,
-                        zIndex: 1000,
-                        display: "grid",
-                        gridTemplateColumns: "repeat(8, 1fr)",
-                        gap: 4,
-                        maxHeight: 120,
-                        overflowY: "auto",
-                        boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-                      }}
-                    >
-                      {emojis.map((e) => (
-                        <button
-                          key={e}
-                          style={{
-                            fontSize: 18,
-                            background: "none",
-                            border: "none",
-                            cursor: "pointer",
-                            padding: 4,
-                            borderRadius: 4,
-                            outline: "none",
-                          }}
-                          onClick={(ev) => {
-                            ev.stopPropagation();
-                            updateShape({ emoji: e });
-                            setShowEmojiPicker(false);
-                          }}
-                        >
-                          {e}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </>
+            {/* Emoji Picker or Static */}
+            <div
+              style={{
+                position: "relative",
+                minWidth: "30px",
+                paddingTop: "4px",
+              }}
+            >
+              {isSelected || isEditing ? (
+                <input
+                  type="text"
+                  value={emoji || ""}
+                  maxLength={2}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    const emojiRegex =
+                      /^(?:\p{Emoji}|\p{Extended_Pictographic})$/u;
+                    if (value === "" || emojiRegex.test(value)) {
+                      handleInputChange("emoji", value);
+                    }
+                  }}
+                  onBlur={(e) => {
+                    if (!e.target.value) {
+                      handleInputChange("emoji", "");
+                    }
+                  }}
+                  onKeyDown={handleInputKeyDown}
+                  style={{
+                    fontSize: "20px",
+                    borderRadius: 4,
+                    border: "1px solid #ccc",
+                    backgroundColor: "white",
+                    width: "2.5em",
+                    textAlign: "center",
+                    outline: "none",
+                  }}
+                  placeholder="📅"
+                />
               ) : (
-                <span style={{ fontSize: "20px" }}>{emoji}</span>
+                <span
+                  style={{ fontSize: "20px", cursor: "pointer" }}
+                  onClick={() => editor.setEditingShape(shape.id)}
+                >
+                  {emoji || "📅"}
+                </span>
               )}
             </div>
 
-            {/* Title Field */}
+            {/* Title */}
             <div style={{ flex: 1, position: "relative" }}>
-              {isEditing ? (
+              {isSelected || isEditing ? (
                 <input
                   type="text"
                   value={title}
-                  onChange={(e) => updateShape({ title: e.target.value })}
+                  onChange={(e) => handleInputChange("title", e.target.value)}
+                  onKeyDown={handleInputKeyDown}
                   style={{
                     width: "100%",
                     fontSize: currentSizeStyle.fontSize,
@@ -388,6 +611,8 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
                     backgroundColor: "white",
                     outline: "none",
                   }}
+                  placeholder="Section Title"
+                  autoFocus={isEditing}
                 />
               ) : (
                 <div
@@ -395,230 +620,71 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
                     fontSize: currentSizeStyle.fontSize,
                     fontWeight: "bold",
                     color: theme[color].solid,
-                    border: "1px dashed #aaa",
+                    border: "1px dashed transparent",
                     padding: "4px 6px",
                     borderRadius: "4px",
                     minHeight: "24px",
                     cursor: "text",
                     backgroundColor: "rgba(255,255,255,0.8)",
                   }}
+                  onClick={() => editor.setEditingShape(shape.id)}
                 >
                   {title}
                 </div>
               )}
             </div>
 
-            {/* Time Display/Picker */}
-            <div style={{ position: "relative" }}>
-              <button
-                style={{
-                  fontSize: "12px",
-                  color: theme[color].solid,
-                  border: isEditing
-                    ? `2px solid ${theme[color].solid}`
-                    : "1px dashed #aaa",
-                  padding: "4px 8px",
-                  borderRadius: "4px",
-                  cursor: "pointer",
-                  backgroundColor: isEditing
-                    ? "white"
-                    : "rgba(255,255,255,0.8)",
-                  minWidth: "80px",
-                  fontWeight: isEditing ? "bold" : "normal",
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  console.log("Time button clicked, isEditing:", isEditing); // Debug log
-                  if (isEditing) {
-                    setShowTimePicker(!showTimePicker);
-                    setShowEmojiPicker(false); // Close emoji picker when opening time picker
-                    console.log("Setting showTimePicker to:", !showTimePicker); // Debug log
-                  }
-                }}
-                title={isEditing ? "Change time range" : "Click to edit time"}
-              >
-                🕐 {startTime}
-              </button>
-
-              {/* Time Picker Popup - positioned outside the container if needed */}
-              {showTimePicker && isEditing && (
-                <div
-                  style={{
-                    position: "fixed", // Use fixed positioning to avoid clipping
-                    top: "50%",
-                    left: "50%",
-                    transform: "translate(-50%, -50%)",
-                    background: "white",
-                    border: "3px solid #333",
-                    borderRadius: 12,
-                    padding: 16,
-                    zIndex: 9999,
-                    minWidth: 220,
-                    maxWidth: 300,
-                    boxShadow: "0 8px 24px rgba(0,0,0,0.3)",
-                  }}
-                >
-                  {/* Header */}
-                  <div
+            {/* Time Section - Fixed positioning */}
+            <div
+              style={{
+                position: "relative",
+                minWidth: "60px",
+                alignSelf: "flex-start",
+                paddingTop: "4px",
+              }}
+            >
+              {isSelected || isEditing ? (
+                <>
+                  {/* Time trigger button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      // Time controls are always visible when editing
+                    }}
                     style={{
-                      marginBottom: 12,
-                      fontSize: "14px",
-                      fontWeight: "bold",
-                      textAlign: "center",
-                      borderBottom: "1px solid #eee",
-                      paddingBottom: 8,
+                      fontSize: "12px",
+                      color: theme[color].solid,
+                      border: `1px solid ${theme[color].solid}`,
+                      padding: "4px 8px",
+                      borderRadius: "4px",
+                      backgroundColor: "white",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px",
+                      outline: "none",
                     }}
                   >
-                    Set Time Range
-                  </div>
-
-                  {/* Start Time */}
-                  <div style={{ marginBottom: 12 }}>
-                    <div
-                      style={{
-                        fontSize: "12px",
-                        fontWeight: "bold",
-                        marginBottom: 6,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                      }}
-                    >
-                      start:
-                      <div
-                        style={{
-                          border: "2px dashed #ccc",
-                          padding: "2px 8px",
-                          borderRadius: 4,
-                          fontSize: "11px",
-                          backgroundColor: "#f9f9f9",
-                          fontFamily: "monospace",
-                        }}
-                      >
-                        {startTime}
-                      </div>
-                    </div>
-                    <select
-                      value={startTime}
-                      onChange={(e) => {
-                        console.log("Start time changed to:", e.target.value); // Debug log
-                        updateShape({ startTime: e.target.value });
-                      }}
-                      style={{
-                        width: "100%",
-                        padding: "6px 8px",
-                        fontSize: "12px",
-                        border: "2px solid #ddd",
-                        borderRadius: 6,
-                        backgroundColor: "white",
-                        cursor: "pointer",
-                      }}
-                    >
-                      {timeOptions.map((time) => (
-                        <option key={time} value={time}>
-                          {time}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* End Time */}
-                  <div style={{ marginBottom: 16 }}>
-                    <div
-                      style={{
-                        fontSize: "12px",
-                        fontWeight: "bold",
-                        marginBottom: 6,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                      }}
-                    >
-                      end:
-                      <div
-                        style={{
-                          border: "2px dashed #ccc",
-                          padding: "2px 8px",
-                          borderRadius: 4,
-                          fontSize: "11px",
-                          backgroundColor: "#f9f9f9",
-                          fontFamily: "monospace",
-                        }}
-                      >
-                        {endTime}
-                      </div>
-                    </div>
-                    <select
-                      value={endTime}
-                      onChange={(e) => {
-                        console.log("End time changed to:", e.target.value); // Debug log
-                        updateShape({ endTime: e.target.value });
-                      }}
-                      style={{
-                        width: "100%",
-                        padding: "6px 8px",
-                        fontSize: "12px",
-                        border: "2px solid #ddd",
-                        borderRadius: 6,
-                        backgroundColor: "white",
-                        cursor: "pointer",
-                      }}
-                    >
-                      {timeOptions.map((time) => (
-                        <option key={time} value={time}>
-                          {time}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShowTimePicker(false);
-                        console.log("Time picker closed"); // Debug log
-                      }}
-                      style={{
-                        flex: 1,
-                        padding: "8px 12px",
-                        fontSize: "12px",
-                        backgroundColor: theme[color].solid,
-                        color: "white",
-                        border: "none",
-                        borderRadius: 6,
-                        cursor: "pointer",
-                        fontWeight: "bold",
-                      }}
-                    >
-                      Done
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShowTimePicker(false);
-                      }}
-                      style={{
-                        padding: "8px 12px",
-                        fontSize: "12px",
-                        backgroundColor: "#f5f5f5",
-                        color: "#666",
-                        border: "1px solid #ddd",
-                        borderRadius: 6,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
+                    🕐 Time
+                  </button>
+                  {/* Time controls panel */}
+                  {renderTimeControls()}
+                </>
+              ) : (
+                renderTimeDisplay()
               )}
             </div>
           </div>
 
           {/* Details */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "4px",
+              flex: 1,
+            }}
+          >
             <div
               style={{
                 fontSize: "12px",
@@ -628,10 +694,11 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
             >
               Details:
             </div>
-            {isEditing ? (
+            {isSelected || isEditing ? (
               <textarea
                 value={details}
-                onChange={(e) => updateShape({ details: e.target.value })}
+                onChange={(e) => handleInputChange("details", e.target.value)}
+                onKeyDown={handleInputKeyDown}
                 style={{
                   width: "100%",
                   fontSize: "12px",
@@ -644,23 +711,27 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
                   outline: "none",
                   resize: "vertical",
                   fontFamily: "inherit",
+                  flex: 1,
                 }}
+                placeholder="Section details..."
               />
             ) : (
               <div
                 style={{
                   fontSize: "12px",
                   color: theme[color].solid,
-                  border: "1px dashed #aaa",
+                  border: "1px dashed transparent",
                   padding: "6px",
                   borderRadius: "4px",
                   minHeight: "50px",
                   backgroundColor: "rgba(255,255,255,0.8)",
                   cursor: "text",
                   whiteSpace: "pre-wrap",
+                  flex: 1,
                 }}
+                onClick={() => editor.setEditingShape(shape.id)}
               >
-                {details || "Type details here..."}
+                {details || "Click to add details..."}
               </div>
             )}
           </div>
@@ -681,6 +752,10 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
       />
     );
   }
+
+  override onDoubleClick = (shape: SectionShape) => {
+    this.editor.setEditingShape(shape.id);
+  };
 }
 
 // Activity Shape Util
@@ -713,10 +788,16 @@ class ActivityShapeUtil extends BaseBoxShapeUtil<ActivityShape> {
     };
   }
 
+  override canEdit = () => true;
+  override canResize = () => true;
+
   override component(shape: ActivityShape) {
     const { title, description, venue, votes, color, size } = shape.props;
 
+    const editor = useEditor();
     const theme = useDefaultColorTheme();
+    const isSelected = editor.getSelectedShapeIds().includes(shape.id);
+    const isEditing = editor.getEditingShapeId() === shape.id;
 
     const sizeStyles = {
       s: { fontSize: "12px", padding: "8px" },
@@ -726,6 +807,30 @@ class ActivityShapeUtil extends BaseBoxShapeUtil<ActivityShape> {
     };
 
     const currentSizeStyle = sizeStyles[size] || sizeStyles.m;
+
+    const updateShapeProps = useCallback(
+      (updates: Partial<ActivityShape["props"]>) => {
+        editor.updateShape({
+          id: shape.id,
+          type: shape.type,
+          props: { ...shape.props, ...updates },
+        });
+      },
+      [editor, shape.id, shape.type, shape.props]
+    );
+
+    const handleInputChange = useCallback(
+      (field: keyof ActivityShape["props"], value: any) => {
+        updateShapeProps({ [field]: value });
+      },
+      [updateShapeProps]
+    );
+
+    const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === "Escape" || e.key === "Tab") {
+        e.stopPropagation();
+      }
+    }, []);
 
     return (
       <HTMLContainer>
@@ -738,9 +843,15 @@ class ActivityShapeUtil extends BaseBoxShapeUtil<ActivityShape> {
             padding: currentSizeStyle.padding,
             borderRadius: "8px",
             boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-            backgroundColor: theme[color].light,
+            backgroundColor: theme[color].solid + "22",
             border: `2px solid ${theme[color].solid}`,
             fontSize: currentSizeStyle.fontSize,
+            pointerEvents: "all",
+          }}
+          onClick={() => {
+            if (!isEditing) {
+              editor.setEditingShape(shape.id);
+            }
           }}
         >
           <div
@@ -751,18 +862,43 @@ class ActivityShapeUtil extends BaseBoxShapeUtil<ActivityShape> {
               marginBottom: "8px",
             }}
           >
-            <h4
-              style={{
-                fontWeight: "500",
-                fontSize: currentSizeStyle.fontSize,
-                lineHeight: "1.2",
-                flex: 1,
-                color: theme[color].solid,
-                margin: 0,
-              }}
-            >
-              {title}
-            </h4>
+            {isSelected || isEditing ? (
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => handleInputChange("title", e.target.value)}
+                onKeyDown={handleKeyDown}
+                style={{
+                  fontWeight: "500",
+                  fontSize: currentSizeStyle.fontSize,
+                  lineHeight: "1.2",
+                  flex: 1,
+                  color: theme[color].solid,
+                  margin: 0,
+                  border: "1px solid #ccc",
+                  borderRadius: "4px",
+                  padding: "2px 4px",
+                  backgroundColor: "white",
+                  outline: "none",
+                }}
+                placeholder="Activity Title"
+                autoFocus={isEditing}
+              />
+            ) : (
+              <h4
+                style={{
+                  fontWeight: "500",
+                  fontSize: currentSizeStyle.fontSize,
+                  lineHeight: "1.2",
+                  flex: 1,
+                  color: theme[color].solid,
+                  margin: 0,
+                  cursor: "text",
+                }}
+              >
+                {title}
+              </h4>
+            )}
             {votes > 0 && (
               <div
                 style={{
@@ -773,6 +909,7 @@ class ActivityShapeUtil extends BaseBoxShapeUtil<ActivityShape> {
                   display: "flex",
                   alignItems: "center",
                   gap: "2px",
+                  marginLeft: "8px",
                 }}
               >
                 <Vote style={{ width: "10px", height: "10px" }} />
@@ -780,37 +917,85 @@ class ActivityShapeUtil extends BaseBoxShapeUtil<ActivityShape> {
               </div>
             )}
           </div>
-          {description && (
-            <p
+
+          {/* Description */}
+          {isSelected || isEditing ? (
+            <textarea
+              value={description}
+              onChange={(e) => handleInputChange("description", e.target.value)}
+              onKeyDown={handleKeyDown}
               style={{
                 fontSize: "10px",
                 color: "#666",
                 marginBottom: "8px",
-                margin: 0,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                display: "-webkit-box",
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: "vertical",
+                border: "1px solid #ccc",
+                borderRadius: "4px",
+                padding: "4px",
+                backgroundColor: "white",
+                outline: "none",
+                resize: "vertical",
+                minHeight: "30px",
+                fontFamily: "inherit",
               }}
-            >
-              {description}
-            </p>
+              placeholder="Activity description..."
+            />
+          ) : (
+            description && (
+              <p
+                style={{
+                  fontSize: "10px",
+                  color: "#666",
+                  marginBottom: "8px",
+                  margin: "0 0 8px 0",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  display: "-webkit-box",
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: "vertical",
+                  cursor: "text",
+                }}
+              >
+                {description}
+              </p>
+            )
           )}
-          {venue && (
-            <div
+
+          {/* Venue */}
+          {isSelected || isEditing ? (
+            <input
+              type="text"
+              value={venue}
+              onChange={(e) => handleInputChange("venue", e.target.value)}
+              onKeyDown={handleKeyDown}
               style={{
-                display: "flex",
-                alignItems: "center",
                 fontSize: "10px",
                 color: "#888",
                 marginTop: "auto",
-                gap: "4px",
+                border: "1px solid #ccc",
+                borderRadius: "4px",
+                padding: "2px 4px",
+                backgroundColor: "white",
+                outline: "none",
               }}
-            >
-              <MapPin style={{ width: "10px", height: "10px" }} />
-              {venue}
-            </div>
+              placeholder="Venue (optional)"
+            />
+          ) : (
+            venue && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  fontSize: "10px",
+                  color: "#888",
+                  marginTop: "auto",
+                  gap: "4px",
+                  cursor: "text",
+                }}
+              >
+                <MapPin style={{ width: "10px", height: "10px" }} />
+                {venue}
+              </div>
+            )
           )}
         </div>
       </HTMLContainer>
@@ -828,6 +1013,10 @@ class ActivityShapeUtil extends BaseBoxShapeUtil<ActivityShape> {
       />
     );
   }
+
+  override onDoubleClick = (shape: ActivityShape) => {
+    this.editor.setEditingShape(shape.id);
+  };
 }
 
 // ============================================================================
@@ -841,7 +1030,10 @@ class SectionTool extends StateNode {
   override onPointerDown = (info: TLPointerEventInfo) => {
     const { currentPagePoint } = this.editor.inputs;
 
+    const shapeId = createShapeId();
+
     this.editor.createShape({
+      id: shapeId,
       type: "section",
       x: currentPagePoint.x - 150,
       y: currentPagePoint.y - 100,
@@ -855,10 +1047,16 @@ class SectionTool extends StateNode {
         size: "m",
         w: 300,
         h: 200,
+        hasTimeRange: false,
+        hasNoTime: false,
       },
     });
 
     this.editor.setCurrentTool("select");
+    this.editor.select(shapeId);
+    setTimeout(() => {
+      this.editor.setEditingShape(shapeId);
+    }, 100);
   };
 }
 
@@ -869,7 +1067,10 @@ class ActivityTool extends StateNode {
   override onPointerDown = (info: TLPointerEventInfo) => {
     const { currentPagePoint } = this.editor.inputs;
 
+    const shapeId = createShapeId();
+
     this.editor.createShape({
+      id: shapeId,
       type: "activity",
       x: currentPagePoint.x - 90,
       y: currentPagePoint.y - 50,
@@ -886,7 +1087,13 @@ class ActivityTool extends StateNode {
       },
     });
 
+    // Select the newly created shape and start editing
     this.editor.setCurrentTool("select");
+    this.editor.select(shapeId);
+    // Start editing immediately
+    setTimeout(() => {
+      this.editor.setEditingShape(shapeId);
+    }, 100);
   };
 }
 
@@ -990,23 +1197,6 @@ const PlanBoardPanel = track(() => {
         {activeTab === "settings" && <SettingsTab editor={editor} />}
       </div>
 
-      {/* Edit Shape Modal */}
-      <EditShapeModal
-        isOpen={editModalOpen}
-        onClose={() => {
-          setEditModalOpen(false);
-          setEditingShape(null);
-        }}
-        shape={editingShape}
-        onUpdate={(updates) => {
-          if (updates && editor) {
-            editor.updateShape(updates);
-          }
-          setEditModalOpen(false);
-          setEditingShape(null);
-        }}
-      />
-
       {/* Keyboard Shortcuts Modal */}
       <PlanBoardKeyboardShortcuts
         isOpen={shortcutsOpen}
@@ -1033,10 +1223,13 @@ const SectionsTab = track(
       const center = editor.getViewportScreenCenter();
       const pagePoint = editor.screenToPage(center);
 
+      const shapeId = createShapeId();
+
       editor.createShape({
+        id: shapeId,
         type: "section",
-        x: pagePoint.x - 100,
-        y: pagePoint.y - 60,
+        x: pagePoint.x - 150,
+        y: pagePoint.y - 100,
         props: {
           title: "New Section",
           startTime: "9:00 AM",
@@ -1045,10 +1238,32 @@ const SectionsTab = track(
           details: "",
           color: "blue",
           size: "m",
-          w: 200,
-          h: 120,
+          w: 300,
+          h: 200,
+          hasTimeRange: false,
+          hasNoTime: false,
         },
       });
+
+      editor.select(shapeId);
+      setTimeout(() => {
+        editor.setEditingShape(shapeId);
+      }, 100);
+    };
+
+    // Helper function to format time display
+    const formatTimeDisplay = (section: any) => {
+      const { startTime, endTime, hasTimeRange, hasNoTime } = section.props;
+
+      if (hasNoTime) {
+        return "No time";
+      }
+
+      if (hasTimeRange) {
+        return `${startTime} - ${endTime}`;
+      }
+
+      return startTime;
     };
 
     return (
@@ -1079,7 +1294,7 @@ const SectionsTab = track(
                   <div>
                     <p className="text-sm font-medium">{section.props.title}</p>
                     <p className="text-xs text-gray-500">
-                      {section.props.startTime} - {section.props.endTime}
+                      {formatTimeDisplay(section)}
                     </p>
                   </div>
                 </div>
@@ -1087,7 +1302,10 @@ const SectionsTab = track(
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => onEditShape(section)}
+                    onClick={() => {
+                      editor.select(section.id);
+                      editor.setEditingShape(section.id);
+                    }}
                   >
                     <Edit3 className="h-3 w-3" />
                   </Button>
@@ -1125,7 +1343,10 @@ const ActivitiesTab = track(
       const center = editor.getViewportScreenCenter();
       const pagePoint = editor.screenToPage(center);
 
+      const shapeId = createShapeId();
+
       editor.createShape({
+        id: shapeId,
         type: "activity",
         x: pagePoint.x - 90,
         y: pagePoint.y - 50,
@@ -1141,6 +1362,12 @@ const ActivitiesTab = track(
           h: 100,
         },
       });
+
+      // Select and start editing
+      editor.select(shapeId);
+      setTimeout(() => {
+        editor.setEditingShape(shapeId);
+      }, 100);
     };
 
     return (
@@ -1187,7 +1414,10 @@ const ActivitiesTab = track(
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => onEditShape(activity)}
+                    onClick={() => {
+                      editor.select(activity.id);
+                      editor.setEditingShape(activity.id);
+                    }}
                   >
                     <Edit3 className="h-3 w-3" />
                   </Button>
@@ -1278,7 +1508,7 @@ const uiOverrides: TLUiOverrides = {
   },
 
   actions(editor, actions) {
-    // Add custom actions
+    // Add custom actions with keyboard shortcuts
     actions["add-section"] = {
       id: "add-section",
       label: "Add Section",
@@ -1288,10 +1518,13 @@ const uiOverrides: TLUiOverrides = {
         const center = editor.getViewportScreenCenter();
         const pagePoint = editor.screenToPage(center);
 
+        const shapeId = createShapeId();
+
         editor.createShape({
+          id: shapeId,
           type: "section",
-          x: pagePoint.x - 100,
-          y: pagePoint.y - 60,
+          x: pagePoint.x - 150,
+          y: pagePoint.y - 100,
           props: {
             title: "New Section",
             startTime: "9:00 AM",
@@ -1300,10 +1533,17 @@ const uiOverrides: TLUiOverrides = {
             details: "",
             color: "blue",
             size: "m",
-            w: 200,
-            h: 120,
+            w: 300,
+            h: 200,
+            hasTimeRange: false,
+            hasNoTime: false,
           },
         });
+
+        editor.select(shapeId);
+        setTimeout(() => {
+          editor.setEditingShape(shapeId);
+        }, 100);
       },
     };
 
@@ -1316,7 +1556,10 @@ const uiOverrides: TLUiOverrides = {
         const center = editor.getViewportScreenCenter();
         const pagePoint = editor.screenToPage(center);
 
+        const shapeId = createShapeId();
+
         editor.createShape({
+          id: shapeId,
           type: "activity",
           x: pagePoint.x - 90,
           y: pagePoint.y - 50,
@@ -1332,6 +1575,11 @@ const uiOverrides: TLUiOverrides = {
             h: 100,
           },
         });
+
+        editor.select(shapeId);
+        setTimeout(() => {
+          editor.setEditingShape(shapeId);
+        }, 100);
       },
     };
 
@@ -1410,48 +1658,6 @@ export default function Whiteboard({ planId, onMount }: WhiteboardProps) {
   const [isInitialized, setIsInitialized] = useState(false);
   const [hasError, setHasError] = useState(false);
 
-  // Load board state from Convex when available
-  useEffect(() => {
-    if (board?.state && store && !isInitialized) {
-      try {
-        const snapshot = JSON.parse(board.state);
-
-        // Migrate old section shapes to new format
-        if (snapshot.store && snapshot.store.records) {
-          Object.values(snapshot.store.records).forEach((record: any) => {
-            if (record.typeName === "shape" && record.type === "section") {
-              // Migrate old time property to startTime/endTime
-              if (record.props.time && !record.props.startTime) {
-                record.props.startTime = record.props.time;
-                record.props.endTime = getDefaultEndTime(record.props.time);
-                delete record.props.time;
-              }
-            }
-          });
-        }
-
-        loadSnapshot(store, snapshot);
-        console.log("Successfully loaded board state with migration");
-        setIsInitialized(true);
-      } catch (e) {
-        console.error("Failed to parse or load board state:", e);
-        try {
-          console.log("Starting with fresh whiteboard state");
-          setIsInitialized(true);
-        } catch (secondError) {
-          console.error(
-            "Failed to recover from board state error:",
-            secondError
-          );
-          setHasError(true);
-        }
-      }
-    } else if (board?.state === undefined && board !== undefined) {
-      console.log("No board state available, starting fresh");
-      setIsInitialized(true);
-    }
-  }, [board?.state, store, isInitialized]);
-
   // Helper function to calculate default end time (1 hour after start)
   const getDefaultEndTime = (startTime: string): string => {
     const timeOptions = [
@@ -1512,6 +1718,141 @@ export default function Whiteboard({ planId, onMount }: WhiteboardProps) {
     const endIndex = Math.min(currentIndex + 2, timeOptions.length - 1);
     return timeOptions[endIndex];
   };
+
+  // Load board state from Convex when available with comprehensive migration
+  useEffect(() => {
+    if (board?.state && store && !isInitialized) {
+      try {
+        const snapshot = JSON.parse(board.state);
+
+        // Migrate old section shapes to new format
+        if (snapshot.store && snapshot.store.records) {
+          const idMapping = new Map(); // Track old ID -> new ID mapping
+
+          // First pass: Fix shape IDs and collect mapping
+          Object.values(snapshot.store.records).forEach((record: any) => {
+            if (record.typeName === "shape") {
+              // Ensure shape ID has correct prefix
+              if (!record.id.startsWith("shape:")) {
+                const newId = `shape:${record.id}`;
+                idMapping.set(record.id, newId);
+                record.id = newId;
+              }
+
+              // Handle section-specific migrations
+              if (record.type === "section") {
+                // Migrate old time property to startTime/endTime
+                if (record.props.time && !record.props.startTime) {
+                  record.props.startTime = record.props.time;
+                  record.props.endTime = getDefaultEndTime(record.props.time);
+                  delete record.props.time;
+                }
+
+                // Add new boolean properties if they don't exist
+                if (record.props.hasTimeRange === undefined) {
+                  record.props.hasTimeRange = false;
+                }
+                if (record.props.hasNoTime === undefined) {
+                  record.props.hasNoTime = false;
+                }
+              }
+            }
+          });
+
+          // Second pass: Update all references to old shape IDs and ensure all shape IDs are prefixed
+          Object.values(snapshot.store.records).forEach((record: any) => {
+            // Fix selectedShapeIds in page states
+            if (
+              record.typeName === "instance_page_state" &&
+              record.selectedShapeIds
+            ) {
+              record.selectedShapeIds = record.selectedShapeIds.map(
+                (id: string) => {
+                  let fixedId = id;
+                  if (idMapping.has(id)) {
+                    fixedId = idMapping.get(id);
+                  } else if (!id.startsWith("shape:")) {
+                    fixedId = `shape:${id}`;
+                  }
+                  return fixedId;
+                }
+              );
+            }
+
+            // Fix editingShapeId
+            if (
+              record.typeName === "instance_page_state" &&
+              record.editingShapeId
+            ) {
+              let eid = record.editingShapeId;
+              if (idMapping.has(eid)) {
+                eid = idMapping.get(eid);
+              } else if (!eid.startsWith("shape:")) {
+                eid = `shape:${eid}`;
+              }
+              record.editingShapeId = eid;
+            }
+
+            // Fix any other shape references in instance or instance_page_state
+            if (
+              record.typeName === "instance" ||
+              record.typeName === "instance_page_state"
+            ) {
+              Object.keys(record).forEach((key) => {
+                if (typeof record[key] === "string") {
+                  const val = record[key];
+                  if (idMapping.has(val)) {
+                    record[key] = idMapping.get(val);
+                  } else if (
+                    (key.endsWith("Id") || key.endsWith("Shape")) &&
+                    val &&
+                    !val.startsWith("shape:") &&
+                    /^([a-zA-Z0-9_-]+)$/.test(val)
+                  ) {
+                    record[key] = `shape:${val}`;
+                  }
+                } else if (Array.isArray(record[key])) {
+                  // For arrays of IDs, ensure all are prefixed
+                  record[key] = record[key].map((item: any) => {
+                    if (typeof item === "string") {
+                      if (idMapping.has(item)) {
+                        return idMapping.get(item);
+                      } else if (
+                        !item.startsWith("shape:") &&
+                        /^([a-zA-Z0-9_-]+)$/.test(item)
+                      ) {
+                        return `shape:${item}`;
+                      }
+                    }
+                    return item;
+                  });
+                }
+              });
+            }
+          });
+        }
+
+        loadSnapshot(store, snapshot);
+        console.log("Successfully loaded board state with migration");
+        setIsInitialized(true);
+      } catch (e) {
+        console.error("Failed to parse or load board state:", e);
+        try {
+          console.log("Starting with fresh whiteboard state");
+          setIsInitialized(true);
+        } catch (secondError) {
+          console.error(
+            "Failed to recover from board state error:",
+            secondError
+          );
+          setHasError(true);
+        }
+      }
+    } else if (board?.state === undefined && board !== undefined) {
+      console.log("No board state available, starting fresh");
+      setIsInitialized(true);
+    }
+  }, [board?.state, store, isInitialized]);
 
   // Debounced save to prevent excessive API calls
   const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null);
