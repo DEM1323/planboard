@@ -51,6 +51,55 @@ const EMOJI_OPTIONS = [
   "📚",
   "✏️",
   "💻",
+  "🚀",
+  "⭐",
+  "💼",
+  "🎲",
+  "📱",
+  "📷",
+  "🎵",
+  "🎤",
+  "🎸",
+  "🎹",
+  "🎻",
+  "🎺",
+  "🥁",
+  "⚽",
+  "🏀",
+  "🏈",
+  "⚾",
+  "🎾",
+  "🏐",
+  "🏓",
+  "🏸",
+  "🏋️",
+  "🤸",
+  "🤺",
+  "🏇",
+  "⛷️",
+  "🏂",
+  "🏄",
+  "🚣",
+  "💪",
+];
+
+const COLOR_OPTIONS = [
+  { value: "blue", label: "Blue" },
+  { value: "green", label: "Green" },
+  { value: "red", label: "Red" },
+  { value: "orange", label: "Orange" },
+  { value: "purple", label: "Purple" },
+  { value: "yellow", label: "Yellow" },
+  { value: "pink", label: "Pink" },
+  { value: "grey", label: "Grey" },
+  { value: "black", label: "Black" },
+];
+
+const SIZE_OPTIONS = [
+  { value: "s", label: "Small" },
+  { value: "m", label: "Medium" },
+  { value: "l", label: "Large" },
+  { value: "xl", label: "Extra Large" },
 ];
 
 export function EditShapeModal({
@@ -70,6 +119,7 @@ export function EditShapeModal({
     color: string;
     size: string;
     votes: number;
+    isCustom: boolean;
   }>({
     title: "",
     description: "",
@@ -81,35 +131,73 @@ export function EditShapeModal({
     color: "blue",
     size: "m",
     votes: 0,
+    isCustom: true,
   });
 
   useEffect(() => {
     if (shape) {
+      console.log("Loading shape data:", shape); // Debug log
       setFormData({
         title: shape.props.title || "",
         description: shape.props.description || "",
-        startTime: shape.props.startTime || "9:00 AM",
-        endTime: shape.props.endTime || "10:00 AM",
+        startTime: shape.props.startTime || shape.props.time || "9:00 AM", // Handle legacy time property
+        endTime:
+          shape.props.endTime ||
+          getDefaultEndTime(
+            shape.props.startTime || shape.props.time || "9:00 AM"
+          ),
         emoji: shape.props.emoji || "📅",
         details: shape.props.details || "",
         venue: shape.props.venue || "",
         color: shape.props.color || "blue",
         size: shape.props.size || "m",
         votes: shape.props.votes || 0,
+        isCustom: shape.props.isCustom ?? true,
       });
     }
   }, [shape]);
 
+  // Helper function to calculate default end time (1 hour after start)
+  const getDefaultEndTime = (startTime: string): string => {
+    const timeOptions = TIME_OPTIONS;
+    const currentIndex = timeOptions.indexOf(startTime);
+    if (currentIndex === -1) return "10:00 AM"; // fallback
+
+    // Add 2 slots (1 hour) to get end time
+    const endIndex = Math.min(currentIndex + 2, timeOptions.length - 1);
+    return timeOptions[endIndex];
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (shape) {
-      onUpdate({
+      console.log("Updating shape with data:", formData); // Debug log
+
+      // Prepare the update object based on shape type
+      const updateData = {
         id: shape.id,
+        type: shape.type,
         props: {
           ...shape.props,
           ...formData,
         },
-      });
+      };
+
+      // Remove properties that don't belong to this shape type
+      if (shape.type === "section") {
+        delete updateData.props.description;
+        delete updateData.props.venue;
+        delete updateData.props.votes;
+        delete updateData.props.isCustom;
+      } else if (shape.type === "activity") {
+        delete updateData.props.startTime;
+        delete updateData.props.endTime;
+        delete updateData.props.details;
+        delete updateData.props.emoji;
+      }
+
+      console.log("Final update data:", updateData); // Debug log
+      onUpdate(updateData);
     }
     onClose();
   };
@@ -124,7 +212,7 @@ export function EditShapeModal({
   const isSection = shape.type === "section";
   const isActivity = shape.type === "activity";
 
-  // Time options (should match Whiteboard)
+  // Time options (matches Whiteboard component)
   const TIME_OPTIONS = [
     "12:00 AM",
     "12:30 AM",
@@ -178,15 +266,27 @@ export function EditShapeModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Edit {isSection ? "Section" : "Activity"}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            {isSection ? (
+              <>
+                <Clock className="h-5 w-5" />
+                Edit Section
+              </>
+            ) : (
+              <>
+                <MapPin className="h-5 w-5" />
+                Edit Activity
+              </>
+            )}
+          </DialogTitle>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Title */}
           <div className="space-y-2">
-            <Label htmlFor="title">Title</Label>
+            <Label htmlFor="title">Title *</Label>
             <Input
               id="title"
               value={formData.title}
@@ -202,53 +302,89 @@ export function EditShapeModal({
           {isSection && (
             <div className="space-y-2">
               <Label>Emoji</Label>
-              <Input
-                value={formData.emoji}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, emoji: e.target.value }))
-                }
-                placeholder="Emoji"
-                maxLength={2}
-              />
+              <div className="flex items-center gap-2">
+                <Input
+                  value={formData.emoji}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, emoji: e.target.value }))
+                  }
+                  placeholder="Enter emoji..."
+                  maxLength={2}
+                  className="w-20"
+                />
+                <div className="text-2xl">{formData.emoji}</div>
+              </div>
+              <div className="grid grid-cols-10 gap-1 p-2 border rounded max-h-20 overflow-y-auto">
+                {EMOJI_OPTIONS.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    className="text-lg hover:bg-gray-100 p-1 rounded"
+                    onClick={() => setFormData((prev) => ({ ...prev, emoji }))}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
-          {/* Time (for sections) */}
+          {/* Time Range (for sections) */}
           {isSection && (
-            <div className="space-y-2">
-              <Label htmlFor="startTime">Start Time</Label>
-              <select
-                id="startTime"
-                value={formData.startTime}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    startTime: e.target.value,
-                  }))
-                }
-                className="w-full border rounded px-2 py-1"
-              >
-                {TIME_OPTIONS.map((time) => (
-                  <option key={time} value={time}>
-                    {time}
-                  </option>
-                ))}
-              </select>
-              <Label htmlFor="endTime">End Time</Label>
-              <select
-                id="endTime"
-                value={formData.endTime}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, endTime: e.target.value }))
-                }
-                className="w-full border rounded px-2 py-1"
-              >
-                {TIME_OPTIONS.map((time) => (
-                  <option key={time} value={time}>
-                    {time}
-                  </option>
-                ))}
-              </select>
+            <div className="space-y-3">
+              <Label className="flex items-center gap-2">
+                <Clock className="h-4 w-4" />
+                Time Range
+              </Label>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label htmlFor="startTime" className="text-sm text-gray-600">
+                    Start Time
+                  </Label>
+                  <Select
+                    value={formData.startTime}
+                    onValueChange={(value) =>
+                      setFormData((prev) => ({ ...prev, startTime: value }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-60">
+                      {TIME_OPTIONS.map((time) => (
+                        <SelectItem key={time} value={time}>
+                          {time}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="endTime" className="text-sm text-gray-600">
+                    End Time
+                  </Label>
+                  <Select
+                    value={formData.endTime}
+                    onValueChange={(value) =>
+                      setFormData((prev) => ({ ...prev, endTime: value }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-60">
+                      {TIME_OPTIONS.map((time) => (
+                        <SelectItem key={time} value={time}>
+                          {time}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="text-sm text-gray-500 bg-gray-50 p-2 rounded">
+                Duration: {formData.startTime} - {formData.endTime}
+              </div>
             </div>
           )}
 
@@ -264,6 +400,7 @@ export function EditShapeModal({
                 }
                 placeholder="Add any additional details..."
                 rows={3}
+                className="resize-none"
               />
             </div>
           )}
@@ -283,6 +420,7 @@ export function EditShapeModal({
                 }
                 placeholder="Enter description..."
                 rows={3}
+                className="resize-none"
               />
             </div>
           )}
@@ -290,7 +428,10 @@ export function EditShapeModal({
           {/* Venue (for activities) */}
           {isActivity && (
             <div className="space-y-2">
-              <Label htmlFor="venue">Venue</Label>
+              <Label htmlFor="venue" className="flex items-center gap-2">
+                <MapPin className="h-4 w-4" />
+                Venue
+              </Label>
               <Input
                 id="venue"
                 value={formData.venue}
@@ -305,31 +446,62 @@ export function EditShapeModal({
           {/* Color */}
           <div className="space-y-2">
             <Label>Color</Label>
-            <Input
+            <Select
               value={formData.color}
-              onChange={(e) =>
-                setFormData((prev) => ({ ...prev, color: e.target.value }))
+              onValueChange={(value) =>
+                setFormData((prev) => ({ ...prev, color: value }))
               }
-              placeholder="Color (e.g. blue, green, etc.)"
-            />
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {COLOR_OPTIONS.map((color) => (
+                  <SelectItem key={color.value} value={color.value}>
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-4 h-4 rounded border"
+                        style={{
+                          backgroundColor: `var(--color-${color.value}-500, ${color.value})`,
+                        }}
+                      />
+                      {color.label}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Size */}
           <div className="space-y-2">
             <Label>Size</Label>
-            <Input
+            <Select
               value={formData.size}
-              onChange={(e) =>
-                setFormData((prev) => ({ ...prev, size: e.target.value }))
+              onValueChange={(value) =>
+                setFormData((prev) => ({ ...prev, size: value }))
               }
-              placeholder="Size (s, m, l, xl)"
-            />
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SIZE_OPTIONS.map((size) => (
+                  <SelectItem key={size.value} value={size.value}>
+                    {size.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Votes (for activities) */}
           {isActivity && (
             <div className="space-y-2">
-              <Label>Votes</Label>
+              <Label className="flex items-center gap-2">
+                <Vote className="h-4 w-4" />
+                Votes
+              </Label>
               <div className="flex items-center gap-3">
                 <Button
                   type="button"
@@ -337,10 +509,11 @@ export function EditShapeModal({
                   onClick={handleVoteToggle}
                   className="flex items-center gap-2"
                 >
-                  <span>Vote</span>
+                  <Vote className="h-4 w-4" />
+                  {formData.votes > 0 ? "Voted" : "Vote"}
                 </Button>
                 {formData.votes > 0 && (
-                  <span className="text-sm text-gray-600">
+                  <span className="text-sm text-gray-600 bg-gray-100 px-2 py-1 rounded">
                     {formData.votes} vote{formData.votes !== 1 ? "s" : ""}
                   </span>
                 )}
@@ -349,7 +522,7 @@ export function EditShapeModal({
           )}
 
           {/* Actions */}
-          <div className="flex justify-end gap-2 pt-4">
+          <div className="flex justify-end gap-2 pt-4 border-t">
             <Button type="button" variant="outline" onClick={onClose}>
               Cancel
             </Button>
