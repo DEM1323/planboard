@@ -20,6 +20,55 @@ const applicationTables = {
     state: v.string(),
   }).index("by_plan", ["planId"]),
 
+  // Real-time user presence on boards
+  boardPresence: defineTable({
+    planId: v.id("plans"),
+    userId: v.optional(v.id("users")),
+    sessionId: v.string(), // For anonymous users
+    userName: v.string(),
+    userColor: v.string(),
+    userInitials: v.string(),
+    // TLDraw presence data
+    cursor: v.optional(v.object({
+      x: v.number(),
+      y: v.number(),
+    })),
+    camera: v.optional(v.object({
+      x: v.number(),
+      y: v.number(),
+      z: v.number(),
+    })),
+    selectedShapes: v.array(v.string()),
+    // Additional presence info
+    isEditing: v.boolean(),
+    editingShapeId: v.optional(v.string()),
+    isTyping: v.boolean(),
+    lastActivity: v.number(),
+    joinedAt: v.number(),
+  })
+    .index("by_plan", ["planId"])
+    .index("by_plan_and_session", ["planId", "sessionId"])
+    .index("by_last_activity", ["lastActivity"]),
+
+  // Chat messages for real-time collaboration
+  boardMessages: defineTable({
+    planId: v.id("plans"),
+    userId: v.optional(v.id("users")),
+    sessionId: v.string(),
+    userName: v.string(),
+    userColor: v.string(),
+    message: v.string(),
+    timestamp: v.number(),
+    // Optional: message type for system messages
+    type: v.optional(v.union(
+      v.literal("chat"),
+      v.literal("system"),
+      v.literal("activity")
+    )),
+  })
+    .index("by_plan", ["planId"])
+    .index("by_plan_and_timestamp", ["planId", "timestamp"]),
+
   // New tables for plan board functionality
   sections: defineTable({
     planId: v.id("plans"),

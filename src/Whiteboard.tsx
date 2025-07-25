@@ -37,6 +37,15 @@ import { Id } from "../convex/_generated/dataModel";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
 import { PlanBoardKeyboardShortcuts } from "./components/PlanBoardKeyboardShortcuts";
+import { useUserPresence } from "./lib/use-user-presence";
+import {
+  ActiveUsersList,
+  PresencePanel,
+  UserCursor,
+  CollaboratorCursor,
+  ActivityIndicator,
+  TypingIndicator,
+} from "./components/PresenceComponents";
 
 import {
   Plus,
@@ -52,6 +61,7 @@ import {
   Layers,
   Grid3X3,
   Keyboard,
+  MessageCircle,
 } from "lucide-react";
 import "tldraw/tldraw.css";
 
@@ -72,8 +82,6 @@ export type SectionShape = TLBaseShape<
     size: TLDefaultSizeStyle;
     w: number;
     h: number;
-    hasTimeRange: boolean; // New: whether to show time range
-    hasNoTime: boolean; // New: whether to show no time at all
   }
 >;
 
@@ -107,8 +115,6 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
     size: DefaultSizeStyle,
     w: T.number,
     h: T.number,
-    hasTimeRange: T.boolean,
-    hasNoTime: T.boolean,
   };
 
   override getDefaultProps(): SectionShape["props"] {
@@ -122,8 +128,6 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
       size: "m",
       w: 300,
       h: 200,
-      hasTimeRange: false,
-      hasNoTime: false,
     };
   }
 
@@ -131,17 +135,8 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
   override canResize = () => true;
 
   override component(shape: SectionShape) {
-    const {
-      title,
-      startTime,
-      endTime,
-      emoji,
-      details,
-      color,
-      size,
-      hasTimeRange,
-      hasNoTime,
-    } = shape.props;
+    const { title, startTime, endTime, emoji, details, color, size } =
+      shape.props;
 
     const editor = useEditor();
     const theme = useDefaultColorTheme();
@@ -250,51 +245,11 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
       [editor]
     );
 
-    // Handle checkbox changes with mutual exclusivity and proper event handling
-    const handleTimeRangeChange = useCallback(
-      (e: React.ChangeEvent<HTMLInputElement>) => {
-        e.stopPropagation();
-        const checked = e.target.checked;
-        if (checked) {
-          updateShapeProps({ hasTimeRange: true, hasNoTime: false });
-        } else {
-          updateShapeProps({ hasTimeRange: false });
-        }
-      },
-      [updateShapeProps]
-    );
-
-    const handleNoTimeChange = useCallback(
-      (e: React.ChangeEvent<HTMLInputElement>) => {
-        e.stopPropagation();
-        const checked = e.target.checked;
-        if (checked) {
-          updateShapeProps({ hasNoTime: true, hasTimeRange: false });
-        } else {
-          updateShapeProps({ hasNoTime: false });
-        }
-      },
-      [updateShapeProps]
-    );
-
-    // Render time display based on settings
+    // Render time display - simple logic based on whether end time is empty
     const renderTimeDisplay = () => {
-      if (hasNoTime) {
-        return (
-          <span
-            style={{
-              fontSize: "16px",
-              color: theme[color].solid,
-              cursor: "pointer",
-            }}
-            onClick={() => editor.setEditingShape(shape.id)}
-          >
-            🕐
-          </span>
-        );
-      }
+      const hasEndTime = endTime && endTime.trim() !== "";
 
-      if (hasTimeRange) {
+      if (hasEndTime) {
         return (
           <span
             style={{
@@ -309,12 +264,12 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
             }}
             onClick={() => editor.setEditingShape(shape.id)}
           >
-            🕐 {startTime} - {endTime}
+            🕒 {startTime} - {endTime}
           </span>
         );
       }
 
-      // Default: just start time
+      // Just start time if no end time
       return (
         <span
           style={{
@@ -329,186 +284,8 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
           }}
           onClick={() => editor.setEditingShape(shape.id)}
         >
-          🕐 {startTime}
+          🕒 {startTime}
         </span>
-      );
-    };
-
-    // Render time controls when editing - fixed positioning and sizing
-    const renderTimeControls = () => {
-      return (
-        <div
-          style={{
-            position: "absolute",
-            top: "100%",
-            right: "0",
-            zIndex: 1000,
-            display: "flex",
-            flexDirection: "column",
-            gap: "8px",
-            padding: "8px",
-            border: `1px solid ${theme[color].solid}`,
-            borderRadius: "4px",
-            backgroundColor: "white",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-            minWidth: "240px",
-            marginTop: "4px",
-          }}
-        >
-          {/* Time inputs row */}
-          <div
-            style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}
-          >
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "4px",
-                flex: 1,
-              }}
-            >
-              <label
-                style={{
-                  fontSize: "10px",
-                  fontWeight: "bold",
-                  color: "#666",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.5px",
-                }}
-              >
-                start time
-              </label>
-              <select
-                value={startTime}
-                onChange={(e) => {
-                  e.stopPropagation();
-                  handleInputChange("startTime", e.target.value);
-                }}
-                onKeyDown={handleInputKeyDown}
-                style={{
-                  fontSize: "12px",
-                  borderRadius: 4,
-                  border: "1px solid #ccc",
-                  backgroundColor: "white",
-                  padding: "6px 4px",
-                  width: "100%",
-                  outline: "none",
-                }}
-              >
-                {timeOptions.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "4px",
-                flex: 1,
-              }}
-            >
-              <label
-                style={{
-                  fontSize: "10px",
-                  fontWeight: "bold",
-                  color: hasTimeRange ? "#666" : "#ccc",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.5px",
-                }}
-              >
-                end time
-              </label>
-              <select
-                value={endTime}
-                onChange={(e) => {
-                  e.stopPropagation();
-                  handleInputChange("endTime", e.target.value);
-                }}
-                onKeyDown={handleInputKeyDown}
-                disabled={!hasTimeRange}
-                style={{
-                  fontSize: "12px",
-                  borderRadius: 4,
-                  border: "1px solid #ccc",
-                  backgroundColor: hasTimeRange ? "white" : "#f5f5f5",
-                  padding: "6px 4px",
-                  width: "100%",
-                  opacity: hasTimeRange ? 1 : 0.6,
-                  cursor: hasTimeRange ? "pointer" : "not-allowed",
-                  outline: "none",
-                }}
-              >
-                {timeOptions.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Checkboxes */}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "6px",
-              paddingTop: "4px",
-            }}
-          >
-            <label
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                fontSize: "12px",
-                cursor: "pointer",
-                userSelect: "none",
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <input
-                type="checkbox"
-                checked={hasTimeRange}
-                onChange={handleTimeRangeChange}
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                  margin: 0,
-                  cursor: "pointer",
-                }}
-              />
-              <span style={{ color: "#666" }}>time range</span>
-            </label>
-
-            <label
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                fontSize: "12px",
-                cursor: "pointer",
-                userSelect: "none",
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <input
-                type="checkbox"
-                checked={hasNoTime}
-                onChange={handleNoTimeChange}
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                  margin: 0,
-                  cursor: "pointer",
-                }}
-              />
-              <span style={{ color: "#666" }}>no time</span>
-            </label>
-          </div>
-        </div>
       );
     };
 
@@ -534,24 +311,17 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
           onFocus={handleInputFocus}
           onBlur={handleInputBlur}
         >
-          {/* Header: Emoji, Title, Time */}
+          {/* Header: Emoji + Section Name */}
           <div
             style={{
               display: "flex",
-              alignItems: "flex-start",
+              alignItems: "center",
               gap: "8px",
-              position: "relative",
-              overflow: "visible",
+              marginBottom: "12px",
             }}
           >
-            {/* Emoji Picker or Static */}
-            <div
-              style={{
-                position: "relative",
-                minWidth: "30px",
-                paddingTop: "4px",
-              }}
-            >
+            {/* Emoji */}
+            <div>
               {isSelected || isEditing ? (
                 <input
                   type="text"
@@ -592,8 +362,8 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
               )}
             </div>
 
-            {/* Title */}
-            <div style={{ flex: 1, position: "relative" }}>
+            {/* Section Name */}
+            <div style={{ flex: 1 }}>
               {isSelected || isEditing ? (
                 <input
                   type="text"
@@ -611,7 +381,7 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
                     backgroundColor: "white",
                     outline: "none",
                   }}
-                  placeholder="Section Title"
+                  placeholder="Section Name"
                   autoFocus={isEditing}
                 />
               ) : (
@@ -633,63 +403,133 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
                 </div>
               )}
             </div>
-
-            {/* Time Section - Fixed positioning */}
-            <div
-              style={{
-                position: "relative",
-                minWidth: "60px",
-                alignSelf: "flex-start",
-                paddingTop: "4px",
-              }}
-            >
-              {isSelected || isEditing ? (
-                <>
-                  {/* Time trigger button */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      // Time controls are always visible when editing
-                    }}
-                    style={{
-                      fontSize: "12px",
-                      color: theme[color].solid,
-                      border: `1px solid ${theme[color].solid}`,
-                      padding: "4px 8px",
-                      borderRadius: "4px",
-                      backgroundColor: "white",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "4px",
-                      outline: "none",
-                    }}
-                  >
-                    🕐 Time
-                  </button>
-                  {/* Time controls panel */}
-                  {renderTimeControls()}
-                </>
-              ) : (
-                renderTimeDisplay()
-              )}
-            </div>
           </div>
 
-          {/* Details */}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "4px",
-              flex: 1,
-            }}
-          >
+          {/* Time Section */}
+          <div style={{ marginBottom: "12px" }}>
+            {isSelected || isEditing ? (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "8px",
+                  padding: "8px",
+                  border: `1px solid ${theme[color].solid}`,
+                  borderRadius: "4px",
+                  backgroundColor: "white",
+                }}
+              >
+                {/* Time inputs row */}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "12px",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "4px",
+                      flex: 1,
+                    }}
+                  >
+                    <label
+                      style={{
+                        fontSize: "10px",
+                        fontWeight: "bold",
+                        color: "#666",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.5px",
+                      }}
+                    >
+                      start time
+                    </label>
+                    <select
+                      value={startTime}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        handleInputChange("startTime", e.target.value);
+                      }}
+                      onKeyDown={handleInputKeyDown}
+                      style={{
+                        fontSize: "12px",
+                        borderRadius: 4,
+                        border: "1px solid #ccc",
+                        backgroundColor: "white",
+                        padding: "6px 4px",
+                        width: "100%",
+                        outline: "none",
+                      }}
+                    >
+                      {timeOptions.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "4px",
+                      flex: 1,
+                    }}
+                  >
+                    <label
+                      style={{
+                        fontSize: "10px",
+                        fontWeight: "bold",
+                        color: "#666",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.5px",
+                      }}
+                    >
+                      end time
+                    </label>
+                    <select
+                      value={endTime}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        handleInputChange("endTime", e.target.value);
+                      }}
+                      onKeyDown={handleInputKeyDown}
+                      style={{
+                        fontSize: "12px",
+                        borderRadius: 4,
+                        border: "1px solid #ccc",
+                        backgroundColor: "white",
+                        padding: "6px 4px",
+                        width: "100%",
+                        outline: "none",
+                      }}
+                    >
+                      <option value="">No end time</option>
+                      {timeOptions.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              renderTimeDisplay()
+            )}
+          </div>
+
+          {/* Details Section */}
+          <div style={{ marginBottom: "12px" }}>
             <div
               style={{
                 fontSize: "12px",
                 fontWeight: "bold",
                 color: theme[color].solid,
+                marginBottom: "4px",
               }}
             >
               Details:
@@ -711,29 +551,61 @@ class SectionShapeUtil extends BaseBoxShapeUtil<SectionShape> {
                   outline: "none",
                   resize: "vertical",
                   fontFamily: "inherit",
-                  flex: 1,
                 }}
-                placeholder="Section details..."
+                placeholder="Type details here..."
               />
             ) : (
               <div
                 style={{
                   fontSize: "12px",
                   color: theme[color].solid,
-                  border: "1px dashed transparent",
+                  border: "1px solid #000",
                   padding: "6px",
                   borderRadius: "4px",
                   minHeight: "50px",
-                  backgroundColor: "rgba(255,255,255,0.8)",
+                  backgroundColor: "white",
                   cursor: "text",
                   whiteSpace: "pre-wrap",
-                  flex: 1,
                 }}
                 onClick={() => editor.setEditingShape(shape.id)}
               >
-                {details || "Click to add details..."}
+                {details || "Type details here..."}
               </div>
             )}
+          </div>
+
+          {/* Activities Section */}
+          <div style={{ flex: 1 }}>
+            <div
+              style={{
+                fontSize: "12px",
+                fontWeight: "bold",
+                color: theme[color].solid,
+                marginBottom: "4px",
+              }}
+            >
+              Activities:
+            </div>
+            <div
+              style={{
+                border: "2px dashed #000",
+                borderRadius: "4px",
+                minHeight: "80px",
+                backgroundColor: "white",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                padding: "16px",
+              }}
+              onClick={() => editor.setEditingShape(shape.id)}
+            >
+              <div style={{ fontSize: "24px", marginBottom: "4px" }}>+</div>
+              <div style={{ fontSize: "12px", color: "#666" }}>
+                Add an Activity
+              </div>
+            </div>
           </div>
         </div>
       </HTMLContainer>
@@ -1040,15 +912,13 @@ class SectionTool extends StateNode {
       props: {
         title: "New Section",
         startTime: "9:00 AM",
-        endTime: "10:00 AM",
+        endTime: "",
         emoji: "📅",
         details: "",
         color: "blue",
         size: "m",
         w: 300,
         h: 200,
-        hasTimeRange: false,
-        hasNoTime: false,
       },
     });
 
@@ -1101,23 +971,48 @@ class ActivityTool extends StateNode {
 // CUSTOM UI COMPONENTS
 // ============================================================================
 
-// Plan Board Panel Component
+// Enhanced Plan Board Panel Component with Presence
 const PlanBoardPanel = track(() => {
   const editor = useEditor();
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    "sections" | "activities" | "settings"
+    "sections" | "activities" | "settings" | "presence"
   >("sections");
   const [editingShape, setEditingShape] = useState<any>(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
+  // Get presence data from props (will be passed from parent)
+  const presenceData = (editor as any).presenceData || {
+    users: [],
+    currentSessionId: null,
+    isOnline: true,
+    userCount: 0,
+  };
+
   if (!isOpen) {
     return (
-      <div className="fixed top-4 right-4 z-50">
+      <div className="fixed top-4 right-4 z-50 flex flex-col gap-2">
+        {/* Active Users Display */}
+        {presenceData.users.length > 1 && (
+          <div className="bg-white rounded-lg shadow-sm border p-2">
+            <ActiveUsersList
+              users={presenceData.users}
+              currentSessionId={presenceData.currentSessionId}
+              maxVisible={3}
+            />
+          </div>
+        )}
+
+        {/* Main Panel Button */}
         <Button onClick={() => setIsOpen(true)} size="sm" className="shadow-lg">
           <Layers className="h-4 w-4 mr-2" />
           Plan Board
+          {presenceData.userCount > 1 && (
+            <Badge variant="secondary" className="ml-2 text-xs">
+              {presenceData.userCount}
+            </Badge>
+          )}
         </Button>
       </div>
     );
@@ -1144,7 +1039,7 @@ const PlanBoardPanel = track(() => {
 
       <div className="flex border-b">
         <button
-          className={`flex-1 px-4 py-2 text-sm font-medium ${
+          className={`flex-1 px-3 py-2 text-xs font-medium ${
             activeTab === "sections"
               ? "border-b-2 border-blue-500 text-blue-600"
               : "text-gray-600 hover:text-gray-800"
@@ -1154,7 +1049,7 @@ const PlanBoardPanel = track(() => {
           Sections
         </button>
         <button
-          className={`flex-1 px-4 py-2 text-sm font-medium ${
+          className={`flex-1 px-3 py-2 text-xs font-medium ${
             activeTab === "activities"
               ? "border-b-2 border-blue-500 text-blue-600"
               : "text-gray-600 hover:text-gray-800"
@@ -1164,7 +1059,23 @@ const PlanBoardPanel = track(() => {
           Activities
         </button>
         <button
-          className={`flex-1 px-4 py-2 text-sm font-medium ${
+          className={`flex-1 px-3 py-2 text-xs font-medium relative ${
+            activeTab === "presence"
+              ? "border-b-2 border-blue-500 text-blue-600"
+              : "text-gray-600 hover:text-gray-800"
+          }`}
+          onClick={() => setActiveTab("presence")}
+        >
+          <Users className="w-3 h-3 inline mr-1" />
+          Users
+          {presenceData.userCount > 1 && (
+            <Badge variant="secondary" className="ml-1 text-xs px-1 py-0">
+              {presenceData.userCount}
+            </Badge>
+          )}
+        </button>
+        <button
+          className={`flex-1 px-3 py-2 text-xs font-medium ${
             activeTab === "settings"
               ? "border-b-2 border-blue-500 text-blue-600"
               : "text-gray-600 hover:text-gray-800"
@@ -1192,6 +1103,13 @@ const PlanBoardPanel = track(() => {
               setEditingShape(shape);
               setEditModalOpen(true);
             }}
+          />
+        )}
+        {activeTab === "presence" && (
+          <PresenceTab
+            users={presenceData.users}
+            currentSessionId={presenceData.currentSessionId}
+            isOnline={presenceData.isOnline}
           />
         )}
         {activeTab === "settings" && <SettingsTab editor={editor} />}
@@ -1233,15 +1151,13 @@ const SectionsTab = track(
         props: {
           title: "New Section",
           startTime: "9:00 AM",
-          endTime: "10:00 AM",
+          endTime: "",
           emoji: "📅",
           details: "",
           color: "blue",
           size: "m",
           w: 300,
           h: 200,
-          hasTimeRange: false,
-          hasNoTime: false,
         },
       });
 
@@ -1253,13 +1169,10 @@ const SectionsTab = track(
 
     // Helper function to format time display
     const formatTimeDisplay = (section: any) => {
-      const { startTime, endTime, hasTimeRange, hasNoTime } = section.props;
+      const { startTime, endTime } = section.props;
+      const hasEndTime = endTime && endTime.trim() !== "";
 
-      if (hasNoTime) {
-        return "No time";
-      }
-
-      if (hasTimeRange) {
+      if (hasEndTime) {
         return `${startTime} - ${endTime}`;
       }
 
@@ -1477,6 +1390,75 @@ const SettingsTab = track(({ editor }: { editor: any }) => {
   );
 });
 
+// Presence Tab Component
+const PresenceTab = track(
+  ({
+    users,
+    currentSessionId,
+    isOnline,
+  }: {
+    users: any[];
+    currentSessionId: string | undefined;
+    isOnline: boolean;
+  }) => {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h4 className="font-medium">Active Users</h4>
+          <ActivityIndicator
+            isOnline={isOnline}
+            userCount={users.length}
+            hasUnreadMessages={false}
+          />
+        </div>
+
+        {/* User List */}
+        <div className="space-y-3">
+          {users.length === 0 ? (
+            <div className="text-center text-gray-500 text-sm py-8">
+              <Users className="w-8 w-8 mx-auto mb-2 opacity-50" />
+              <p>No active users</p>
+              <p className="text-xs">Invite others to collaborate!</p>
+            </div>
+          ) : (
+            <PresencePanel
+              users={users}
+              currentSessionId={currentSessionId}
+              isOnline={isOnline}
+              onUserNameClick={(sessionId) => {
+                console.log("Clicked user:", sessionId);
+                // TODO: Add user interaction features (follow, message, etc.)
+              }}
+            />
+          )}
+        </div>
+
+        {/* Typing Indicator */}
+        <TypingIndicator
+          typingUsers={users
+            .filter((user) => user.isTyping)
+            .map((user) => ({
+              userName: user.userName,
+              userColor: user.userColor,
+            }))}
+        />
+
+        {/* Collaboration Actions */}
+        <div className="pt-4 border-t space-y-2">
+          <Button variant="outline" size="sm" className="w-full">
+            <Share2 className="h-4 w-4 mr-2" />
+            Invite Collaborators
+          </Button>
+          <Button variant="outline" size="sm" className="w-full">
+            <MessageCircle className="h-4 w-4 mr-2" />
+            Open Chat
+          </Button>
+        </div>
+      </div>
+    );
+  }
+);
+
 // ============================================================================
 // TLDRAW OVERRIDES
 // ============================================================================
@@ -1528,15 +1510,13 @@ const uiOverrides: TLUiOverrides = {
           props: {
             title: "New Section",
             startTime: "9:00 AM",
-            endTime: "10:00 AM",
+            endTime: "",
             emoji: "📅",
             details: "",
             color: "blue",
             size: "m",
             w: 300,
             h: 200,
-            hasTimeRange: false,
-            hasNoTime: false,
           },
         });
 
@@ -1628,12 +1608,13 @@ const CustomToolbar = track(() => {
   );
 });
 
-// Custom components to add the plan board panel
+// Enhanced components with presence features
 const components: TLComponents = {
   // Add the plan board panel to the UI
   TopPanel: () => <PlanBoardPanel />,
   // Override the toolbar to include custom tools
   Toolbar: CustomToolbar,
+  // TODO: Add custom collaborator cursors using proper TLDraw API
 };
 
 // ============================================================================
@@ -1649,6 +1630,14 @@ export default function Whiteboard({ planId, onMount }: WhiteboardProps) {
   const board = useQuery(api.boards.getBoardByPlan, { planId });
   const updateBoard = useMutation(api.boards.updateBoard);
 
+  // Presence management
+  const { userPresence, isOnline, updateActivity } = useUserPresence();
+  const boardPresence = useQuery(api.presence.getBoardPresence, { planId });
+  const joinBoard = useMutation(api.presence.joinBoard);
+  const leaveBoard = useMutation(api.presence.leaveBoard);
+  const updatePresence = useMutation(api.presence.updatePresence);
+  const userCount = useQuery(api.presence.getBoardUserCount, { planId });
+
   const [store] = useState(() =>
     createTLStore({
       shapeUtils: [...defaultShapeUtils, SectionShapeUtil, ActivityShapeUtil],
@@ -1657,6 +1646,93 @@ export default function Whiteboard({ planId, onMount }: WhiteboardProps) {
 
   const [isInitialized, setIsInitialized] = useState(false);
   const [hasError, setHasError] = useState(false);
+  const [editorInstance, setEditorInstance] = useState<any>(null);
+
+  // Join board presence when component mounts and user is available
+  useEffect(() => {
+    if (userPresence && isOnline) {
+      joinBoard({
+        planId,
+        sessionId: userPresence.sessionId,
+        userName: userPresence.name,
+        userColor: userPresence.color,
+        userInitials: userPresence.initials,
+        userId: undefined, // For now, using anonymous users
+      }).catch(console.error);
+    }
+  }, [userPresence, isOnline, planId, joinBoard]);
+
+  // Leave board presence when component unmounts or user goes offline
+  useEffect(() => {
+    return () => {
+      if (userPresence) {
+        leaveBoard({
+          planId,
+          sessionId: userPresence.sessionId,
+        }).catch(console.error);
+      }
+    };
+  }, [userPresence, planId, leaveBoard]);
+
+  // Update presence with editor state changes
+  useEffect(() => {
+    if (!editorInstance || !userPresence || !isOnline) return;
+
+    const updatePresenceData = () => {
+      const camera = editorInstance.getCamera();
+      const selectedShapeIds = editorInstance.getSelectedShapeIds();
+      const editingShapeId = editorInstance.getEditingShapeId();
+      const pointer = editorInstance.inputs.currentPagePoint;
+
+      updatePresence({
+        planId,
+        sessionId: userPresence.sessionId,
+        cursor: pointer ? { x: pointer.x, y: pointer.y } : undefined,
+        camera: { x: camera.x, y: camera.y, z: camera.z },
+        selectedShapes: selectedShapeIds,
+        isEditing: Boolean(editingShapeId),
+        editingShapeId: editingShapeId || undefined,
+        isTyping: false, // TODO: Implement typing detection
+      }).catch(console.error);
+
+      updateActivity();
+    };
+
+    // Update presence on various editor events
+    const unsubscribePointer = editorInstance.store.listen(
+      () => {
+        updatePresenceData();
+      },
+      { scope: "session", source: "user" }
+    );
+
+    // Set up periodic presence updates (every 5 seconds)
+    const presenceInterval = setInterval(updatePresenceData, 5000);
+
+    return () => {
+      unsubscribePointer();
+      clearInterval(presenceInterval);
+    };
+  }, [
+    editorInstance,
+    userPresence,
+    isOnline,
+    planId,
+    updatePresence,
+    updateActivity,
+  ]);
+
+  // Attach presence data to editor for PlanBoardPanel access
+  useEffect(() => {
+    if (editorInstance && boardPresence) {
+      (editorInstance as any).presenceData = {
+        users: boardPresence || [],
+        currentSessionId: userPresence?.sessionId || null,
+        isOnline,
+        userCount: userCount || 0,
+      };
+    }
+  }, [editorInstance, boardPresence, userPresence, isOnline, userCount]);
 
   // Helper function to calculate default end time (1 hour after start)
   const getDefaultEndTime = (startTime: string): string => {
@@ -1729,7 +1805,20 @@ export default function Whiteboard({ planId, onMount }: WhiteboardProps) {
         if (snapshot.store && snapshot.store.records) {
           const idMapping = new Map(); // Track old ID -> new ID mapping
 
-          // First pass: Fix shape IDs and collect mapping
+          // Pre-cleanup: Remove any old properties that are no longer in the schema
+          Object.values(snapshot.store.records).forEach((record: any) => {
+            if (
+              record.typeName === "shape" &&
+              record.type === "section" &&
+              record.props
+            ) {
+              // Remove old boolean properties that are no longer in the schema
+              delete record.props.hasTimeRange;
+              delete record.props.hasNoTime;
+            }
+          });
+
+          // First pass: Fix shape IDs and collect mapping, and clean up old properties
           Object.values(snapshot.store.records).forEach((record: any) => {
             if (record.typeName === "shape") {
               // Ensure shape ID has correct prefix
@@ -1748,12 +1837,9 @@ export default function Whiteboard({ planId, onMount }: WhiteboardProps) {
                   delete record.props.time;
                 }
 
-                // Add new boolean properties if they don't exist
-                if (record.props.hasTimeRange === undefined) {
-                  record.props.hasTimeRange = false;
-                }
-                if (record.props.hasNoTime === undefined) {
-                  record.props.hasNoTime = false;
+                // Ensure endTime is empty string if not set
+                if (record.props.endTime === undefined) {
+                  record.props.endTime = "";
                 }
               }
             }
@@ -1837,16 +1923,11 @@ export default function Whiteboard({ planId, onMount }: WhiteboardProps) {
         setIsInitialized(true);
       } catch (e) {
         console.error("Failed to parse or load board state:", e);
-        try {
-          console.log("Starting with fresh whiteboard state");
-          setIsInitialized(true);
-        } catch (secondError) {
-          console.error(
-            "Failed to recover from board state error:",
-            secondError
-          );
-          setHasError(true);
-        }
+        // If migration fails due to schema changes, start fresh
+        console.log(
+          "Starting with fresh whiteboard state due to schema changes"
+        );
+        setIsInitialized(true);
       }
     } else if (board?.state === undefined && board !== undefined) {
       console.log("No board state available, starting fresh");
@@ -1901,6 +1982,8 @@ export default function Whiteboard({ planId, onMount }: WhiteboardProps) {
   }, [store, saveState, saveTimeout, isInitialized]);
 
   const handleMount = (editor: any) => {
+    setEditorInstance(editor);
+
     if (onMount) {
       onMount(editor);
     }
