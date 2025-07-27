@@ -21,10 +21,10 @@ export function useUser() {
 
     if (!userName) {
       // Generate a guest number based on user ID hash
-      const guestNumber = Math.abs(userId.split('').reduce((a, b) => {
+      const guestNumber = (Math.abs(userId.split('').reduce((a, b) => {
         a = ((a << 5) - a) + b.charCodeAt(0);
         return a & a;
-      }, 0)) % 9999 + 1;
+      }, 0)) % 9999) + 1;
       userName = `Guest ${guestNumber}`;
       localStorage.setItem('planboard_user_name', userName);
     }

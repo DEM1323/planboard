@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { TLInstancePresence, track, useEditor } from "tldraw";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -91,7 +91,7 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
   );
 };
 
-// Active users list component
+// Active users list component with debouncing
 interface ActiveUsersListProps {
   users: Array<{
     sessionId: string;
@@ -113,10 +113,27 @@ export const ActiveUsersList: React.FC<ActiveUsersListProps> = ({
   maxVisible = 8,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [debouncedUsers, setDebouncedUsers] = useState(users);
 
-  const otherUsers = users.filter(
-    (user) => user.sessionId !== currentSessionId
-  );
+  // Debounce users updates to prevent jittering
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedUsers(users);
+    }, 100); // 100ms debounce
+
+    return () => clearTimeout(timer);
+  }, [users]);
+
+  // Memoize filtered users to prevent unnecessary recalculations
+  const otherUsers = useMemo(() => {
+    const filtered = debouncedUsers.filter(
+      (user) => user.sessionId !== currentSessionId
+    );
+
+    // Sort by last activity (most recent first) for consistent ordering
+    return filtered.sort((a, b) => b.lastActivity - a.lastActivity);
+  }, [debouncedUsers, currentSessionId]);
+
   const visibleUsers = isExpanded
     ? otherUsers
     : otherUsers.slice(0, maxVisible);
@@ -432,7 +449,7 @@ export const CollaboratorCursor = track(
   }
 );
 
-// Enhanced presence panel component
+// Enhanced presence panel component with debouncing
 interface PresencePanelProps {
   users: Array<{
     sessionId: string;
@@ -456,9 +473,23 @@ export const PresencePanel: React.FC<PresencePanelProps> = ({
   onUserNameClick,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
-  const activeUsers = users.filter(
-    (user) => Date.now() - user.lastActivity < 300000 // Active within 5 minutes
-  );
+  const [debouncedUsers, setDebouncedUsers] = useState(users);
+
+  // Debounce users updates to prevent jittering
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedUsers(users);
+    }, 150); // Slightly longer debounce for the panel
+
+    return () => clearTimeout(timer);
+  }, [users]);
+
+  const activeUsers = useMemo(() => {
+    const now = Date.now();
+    return debouncedUsers
+      .filter((user) => now - user.lastActivity < 300000) // Active within 5 minutes
+      .sort((a, b) => b.lastActivity - a.lastActivity); // Sort by most recent activity
+  }, [debouncedUsers]);
 
   return (
     <div className="bg-white border rounded-lg shadow-sm p-3 min-w-[200px]">

@@ -1,6 +1,11 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 
+// Constants for consistent timing
+const ACTIVITY_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+const CLEANUP_TIMEOUT = 10 * 60 * 1000; // 10 minutes
+const HEARTBEAT_INTERVAL = 30 * 1000; // 30 seconds
+
 // Get all active users on a board
 export const getBoardPresence = query({
   args: { planId: v.id("plans") },
@@ -31,13 +36,25 @@ export const getBoardPresence = query({
   })),
   handler: async (ctx, args) => {
     const now = Date.now();
-    const fiveMinutesAgo = now - 5 * 60 * 1000; // Consider users inactive after 5 minutes
+    const cutoffTime = now - ACTIVITY_TIMEOUT;
     
-    return await ctx.db
+    // Get all presence records for this plan that are still active
+    const allPresence = await ctx.db
       .query("boardPresence")
       .withIndex("by_plan", (q) => q.eq("planId", args.planId))
-      .filter((q) => q.gt(q.field("lastActivity"), fiveMinutesAgo))
+      .filter((q) => q.gt(q.field("lastActivity"), cutoffTime))
       .collect();
+    
+    // Deduplicate by sessionId (shouldn't be necessary, but just in case)
+    const uniquePresence = new Map();
+    for (const presence of allPresence) {
+      const existing = uniquePresence.get(presence.sessionId);
+      if (!existing || presence.lastActivity > existing.lastActivity) {
+        uniquePresence.set(presence.sessionId, presence);
+      }
+    }
+    
+    return Array.from(uniquePresence.values()).sort((a, b) => b.lastActivity - a.lastActivity);
   },
 });
 
@@ -55,45 +72,54 @@ export const joinBoard = mutation({
   handler: async (ctx, args) => {
     const now = Date.now();
     
-    // Check if user already has presence on this board
+    // First, clean up any existing presence for this session to prevent duplicates
     const existingPresence = await ctx.db
       .query("boardPresence")
       .withIndex("by_plan_and_session", (q) => 
         q.eq("planId", args.planId).eq("sessionId", args.sessionId)
       )
-      .unique();
+      .collect(); // Use collect() to get all potential duplicates
     
-    if (existingPresence) {
-      // Update existing presence
-      await ctx.db.patch(existingPresence._id, {
-        userName: args.userName,
-        userColor: args.userColor,
-        userInitials: args.userInitials,
-        lastActivity: now,
-        isEditing: false,
-        isTyping: false,
-        selectedShapes: [],
-      });
-      return existingPresence._id;
-    } else {
-      // Create new presence
-      return await ctx.db.insert("boardPresence", {
-        planId: args.planId,
-        userId: args.userId,
-        sessionId: args.sessionId,
-        userName: args.userName,
-        userColor: args.userColor,
-        userInitials: args.userInitials,
-        cursor: undefined,
-        camera: undefined,
-        selectedShapes: [],
-        isEditing: false,
-        editingShapeId: undefined,
-        isTyping: false,
-        lastActivity: now,
-        joinedAt: now,
-      });
+    // Remove all existing presence records for this session
+    for (const presence of existingPresence) {
+      await ctx.db.delete(presence._id);
     }
+    
+    // Also clean up old inactive sessions for the same user (by userName) to prevent accumulation
+    if (args.userName) {
+      const oldSessions = await ctx.db
+        .query("boardPresence")
+        .withIndex("by_plan", (q) => q.eq("planId", args.planId))
+        .filter((q) => 
+          q.and(
+            q.eq(q.field("userName"), args.userName),
+            q.lt(q.field("lastActivity"), now - CLEANUP_TIMEOUT)
+          )
+        )
+        .collect();
+      
+      for (const oldSession of oldSessions) {
+        await ctx.db.delete(oldSession._id);
+      }
+    }
+    
+    // Create fresh presence record
+    return await ctx.db.insert("boardPresence", {
+      planId: args.planId,
+      userId: args.userId,
+      sessionId: args.sessionId,
+      userName: args.userName,
+      userColor: args.userColor,
+      userInitials: args.userInitials,
+      cursor: undefined,
+      camera: undefined,
+      selectedShapes: [],
+      isEditing: false,
+      editingShapeId: undefined,
+      isTyping: false,
+      lastActivity: now,
+      joinedAt: now,
+    });
   },
 });
 
@@ -126,7 +152,8 @@ export const updatePresence = mutation({
       .unique();
     
     if (!presence) {
-      throw new Error("User presence not found. Please join the board first.");
+      // Don't throw error, just ignore - session might have been cleaned up
+      return null;
     }
     
     const updates: any = {
@@ -145,13 +172,13 @@ export const updatePresence = mutation({
   },
 });
 
-// Leave a board - remove presence
-export const leaveBoard = mutation({
+// Heartbeat to keep session alive
+export const heartbeat = mutation({
   args: {
     planId: v.id("plans"),
     sessionId: v.string(),
   },
-  returns: v.null(),
+  returns: v.boolean(),
   handler: async (ctx, args) => {
     const presence = await ctx.db
       .query("boardPresence")
@@ -160,7 +187,36 @@ export const leaveBoard = mutation({
       )
       .unique();
     
-    if (presence) {
+    if (!presence) {
+      return false; // Session not found
+    }
+    
+    await ctx.db.patch(presence._id, {
+      lastActivity: Date.now(),
+    });
+    
+    return true;
+  },
+});
+
+// Leave a board - remove presence
+export const leaveBoard = mutation({
+  args: {
+    planId: v.id("plans"),
+    sessionId: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    // Get all presence records for this session (in case of duplicates)
+    const presenceRecords = await ctx.db
+      .query("boardPresence")
+      .withIndex("by_plan_and_session", (q) => 
+        q.eq("planId", args.planId).eq("sessionId", args.sessionId)
+      )
+      .collect();
+    
+    // Delete all matching records
+    for (const presence of presenceRecords) {
       await ctx.db.delete(presence._id);
     }
     
@@ -170,16 +226,29 @@ export const leaveBoard = mutation({
 
 // Cleanup inactive users (called periodically)
 export const cleanupInactiveUsers = mutation({
-  args: {},
+  args: { planId: v.optional(v.id("plans")) },
   returns: v.number(),
   handler: async (ctx, args) => {
     const now = Date.now();
-    const tenMinutesAgo = now - 10 * 60 * 1000; // Remove users inactive for 10 minutes
+    const cutoffTime = now - CLEANUP_TIMEOUT;
     
-    const inactiveUsers = await ctx.db
-      .query("boardPresence")
-      .withIndex("by_last_activity", (q) => q.lt("lastActivity", tenMinutesAgo))
-      .collect();
+    let inactiveUsers;
+    
+    if (args.planId) {
+      // Clean up users for a specific plan
+      const planId = args.planId; // TypeScript type narrowing
+      inactiveUsers = await ctx.db
+        .query("boardPresence")
+        .withIndex("by_plan", (q) => q.eq("planId", planId))
+        .filter((q) => q.lt(q.field("lastActivity"), cutoffTime))
+        .collect();
+    } else {
+      // Clean up all inactive users across all plans
+      inactiveUsers = await ctx.db
+        .query("boardPresence")
+        .withIndex("by_last_activity", (q) => q.lt("lastActivity", cutoffTime))
+        .collect();
+    }
     
     let cleanedCount = 0;
     for (const user of inactiveUsers) {
@@ -188,6 +257,26 @@ export const cleanupInactiveUsers = mutation({
     }
     
     return cleanedCount;
+  },
+});
+
+// Get user count for a board with consistent timing
+export const getBoardUserCount = query({
+  args: { planId: v.id("plans") },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const cutoffTime = now - ACTIVITY_TIMEOUT; // Use same timeout as getBoardPresence
+    
+    const activeUsers = await ctx.db
+      .query("boardPresence")
+      .withIndex("by_plan", (q) => q.eq("planId", args.planId))
+      .filter((q) => q.gt(q.field("lastActivity"), cutoffTime))
+      .collect();
+    
+    // Deduplicate by sessionId
+    const uniqueSessions = new Set(activeUsers.map(user => user.sessionId));
+    return uniqueSessions.size;
   },
 });
 
@@ -251,23 +340,5 @@ export const sendMessage = mutation({
       timestamp: Date.now(),
       type: args.type || "chat",
     });
-  },
-});
-
-// Get user count for a board
-export const getBoardUserCount = query({
-  args: { planId: v.id("plans") },
-  returns: v.number(),
-  handler: async (ctx, args) => {
-    const now = Date.now();
-    const fiveMinutesAgo = now - 5 * 60 * 1000;
-    
-    const activeUsers = await ctx.db
-      .query("boardPresence")
-      .withIndex("by_plan", (q) => q.eq("planId", args.planId))
-      .filter((q) => q.gt(q.field("lastActivity"), fiveMinutesAgo))
-      .collect();
-    
-    return activeUsers.length;
   },
 }); 

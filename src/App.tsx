@@ -24,6 +24,7 @@ import { EmptyState } from "./components/EmptyState";
 import { UserHeader } from "./components/UserHeader";
 import { AuthPage } from "./AuthPage";
 import { CalendarPopup } from "./components/CalendarPopup";
+import { HeaderBar } from "./components/HeaderBar";
 
 // Whiteboard component (keeping the existing one)
 import Whiteboard from "./Whiteboard";
@@ -293,6 +294,16 @@ function PlanPage() {
   const [isUpdating, setIsUpdating] = useState(false);
 
   const user = useQuery(api.auth.loggedInUser);
+
+  // Board presence queries for header
+  const boardPresence = useQuery(
+    api.presence.getBoardPresence,
+    plan ? { planId: plan._id } : "skip"
+  );
+
+  // User presence hook (this might need to be imported)
+  const userPresence = null; // TODO: Add proper user presence logic
+  const isOnline = true; // TODO: Add proper online status
 
   // Store tldraw editor reference when whiteboard mounts
   const handleWhiteboardMount = (editor: any) => {
@@ -575,133 +586,53 @@ function PlanPage() {
     });
   };
 
-  const planDate = formatPlanDate(plan.date);
+  const planDate = formatPlanDate(plan.date) || "";
 
   // Check if current user is the owner of the plan
   const isOwner = user && plan.createdBy === user._id;
 
+  // Handle date click from HeaderBar
+  const handleDateClick = (event: React.MouseEvent) => {
+    const element = event.currentTarget as HTMLElement;
+    const rect = element.getBoundingClientRect();
+
+    const position = {
+      top: rect.bottom + window.scrollY + 8,
+      left: rect.left + window.scrollX,
+    };
+
+    setCalendarPosition(position);
+    setShowCalendar(true);
+  };
+
   return (
     <div className="h-screen flex flex-col">
-      <header className="border-b bg-background z-10 shadow-sm">
-        <div className="container mx-auto px-4 py-3 flex justify-between items-center">
-          <div className="flex items-center space-x-3 min-w-0 flex-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigate("/")}
-              className="flex items-center space-x-2 flex-shrink-0"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>Back</span>
-            </Button>
-            <div className="border-l border-gray-300 h-6 flex-shrink-0"></div>
-            <div className="min-w-0 flex-1">
-              {/* Editable Title */}
-              {isEditingTitle ? (
-                <input
-                  type="text"
-                  value={editingTitle}
-                  onChange={(e) => setEditingTitle(e.target.value)}
-                  onBlur={handleTitleSave}
-                  onKeyDown={handleTitleKeyDown}
-                  className="text-lg font-semibold bg-transparent border-b-2 border-primary focus:outline-none w-full"
-                  autoFocus
-                  disabled={isUpdating}
-                />
-              ) : (
-                <h1
-                  className={`text-lg font-semibold truncate ${
-                    isOwner
-                      ? "cursor-pencil hover:bg-gray-100 rounded px-1 -mx-1 transition-colors"
-                      : ""
-                  }`}
-                  onClick={isOwner ? handleTitleEdit : undefined}
-                  style={{
-                    cursor: isOwner
-                      ? "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 2 4 4-14 14H4v-4L18 2z'/%3E%3Cpath d='m14.5 5.5 4 4'/%3E%3C/svg%3E\") 0 20, pointer"
-                      : "default",
-                  }}
-                  title={isOwner ? "Click to edit plan title" : ""}
-                >
-                  {plan.title}
-                </h1>
-              )}
-
-              <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                {/* Inline Editable Date */}
-                <div className="flex items-center relative">
-                  <Calendar className="h-3 w-3 mr-1" />
-                  {isEditingDate ? (
-                    <input
-                      type="text"
-                      value={editingDate}
-                      onChange={(e) => setEditingDate(e.target.value)}
-                      onBlur={handleDateSave}
-                      onKeyDown={handleDateKeyDown}
-                      placeholder="MM/DD/YYYY"
-                      className="text-sm bg-transparent border-b border-primary focus:outline-none w-28"
-                      autoFocus
-                      disabled={isUpdating}
-                    />
-                  ) : (
-                    <>
-                      {planDate ? (
-                        <span
-                          ref={dateElementRef}
-                          className={`truncate ${
-                            isOwner
-                              ? "cursor-pencil hover:bg-gray-100 rounded px-1 -mx-1 transition-colors"
-                              : ""
-                          }`}
-                          onClick={isOwner ? handleDateEdit : undefined}
-                          style={{
-                            cursor: isOwner
-                              ? "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 2 4 4-14 14H4v-4L18 2z'/%3E%3Cpath d='m14.5 5.5 4 4'/%3E%3C/svg%3E\") 0 20, pointer"
-                              : "default",
-                          }}
-                          title={isOwner ? "Click to edit plan date" : ""}
-                        >
-                          {planDate}
-                        </span>
-                      ) : isOwner ? (
-                        <span
-                          ref={dateElementRef}
-                          className="text-muted-foreground/60 cursor-pencil hover:bg-gray-100 rounded px-1 -mx-1 transition-colors"
-                          onClick={handleDateEdit}
-                          style={{
-                            cursor:
-                              "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 2 4 4-14 14H4v-4L18 2z'/%3E%3Cpath d='m14.5 5.5 4 4'/%3E%3C/svg%3E\") 0 20, pointer",
-                          }}
-                          title="Click to add plan date"
-                        >
-                          Add date
-                        </span>
-                      ) : (
-                        <span>No date set</span>
-                      )}
-                    </>
-                  )}
-                </div>
-                <div className="flex items-center">
-                  <span>Code: </span>
-                  <span className="font-mono font-semibold ml-1">
-                    {shareCode}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="flex gap-2 flex-shrink-0 ml-4">
-            <Button variant="outline" onClick={() => setShareModalOpen(true)}>
-              <Share2 className="h-4 w-4 mr-2" />
-              Share
-            </Button>
-          </div>
-        </div>
-      </header>
+      {plan && shareCode && (
+        <HeaderBar
+          plan={plan}
+          shareCode={shareCode}
+          isOwner={!!isOwner}
+          isEditingTitle={isEditingTitle}
+          editingTitle={editingTitle}
+          planDate={planDate}
+          isUpdating={isUpdating}
+          boardPresence={boardPresence || []}
+          currentSessionId={undefined}
+          isOnline={true}
+          onNavigateBack={() => navigate("/")}
+          onTitleEdit={handleTitleEdit}
+          onTitleSave={handleTitleSave}
+          onTitleKeyDown={handleTitleKeyDown}
+          onTitleChange={setEditingTitle}
+          onDateClick={handleDateClick}
+          onShareClick={() => setShareModalOpen(true)}
+        />
+      )}
 
       <div className="flex-1 bg-gray-50">
-        <Whiteboard planId={plan._id} onMount={handleWhiteboardMount} />
+        {plan && (
+          <Whiteboard planId={plan._id} onMount={handleWhiteboardMount} />
+        )}
       </div>
 
       {/* Calendar Popup */}
